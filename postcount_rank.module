@@ -1,0 +1,127 @@
+<?php
+// $Id$
+
+
+function postcount_rank_menu($may_cache) {
+  $items = array();
+
+  if ($may_cache) {
+    $items[] = array(
+      'path' => 'admin/settings/postcount_rank',
+      'title' => t('Postcount Rank'),
+      'callback' => 'drupal_get_form',
+      'callback arguments' => array('postcount_rank_admin_settings'),
+    );
+  }
+
+  return $items;
+}
+
+
+function postcount_rank_admin_settings() {
+  $form = array();
+  $options = array();
+  $ranks = '';
+  $fid = variable_get('postcount_rank_fid', 0);
+
+  $result = db_query("SELECT fid, title, options FROM {profile_fields} WHERE visibility = %d AND type = 'selection'", PROFILE_HIDDEN);
+  while ($row = db_fetch_object($result)) {
+    $options[$row->fid] = $row->title;
+    if ($row->fid == $fid) {
+      $ranks = preg_split('`[\n\r]+`', trim($row->options));
+    }
+  }
+
+  if (count($options)) {
+    $form['postcount_rank_fid'] = array(
+      '#type' => 'select',
+      '#title' => t('Profile field'),
+      '#description' => t('The profile field that contains a list of ranks'),
+      '#options' => $options,
+    );
+  }
+  else {
+    drupal_set_message(t('You need to have at least one hidden "list selection" field in your user profiles for this module to function'));
+  }
+
+  if ($fid) {
+    if (count($ranks)) {
+      $list_metrics = variable_get('postcount_rank_metrics', array());
+      $form['postcount_rank_metrics'] = array(
+        '#type' => 'fieldset',
+        '#title' => t('Metrics'),
+        '#description' => t('Enter the minimum number of posts required to attain each rank'),
+        '#tree' => TRUE,
+      );
+      foreach ($ranks as $rank) {
+        $form['postcount_rank_metrics'][$rank] = array(
+          '#type' => 'textfield',
+          '#title' => t($rank),
+          '#default_value' => $list_metrics[$rank],
+        );
+      }
+    }
+    else {
+      drupal_set_message(t('The selected profile field does not contain any options'));
+    }
+  }
+
+  return system_settings_form($form);
+}
+
+
+function postcount_rank_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
+  if ($op == 'insert') {
+    postcount_rank_update();
+  }
+}
+
+
+function postcount_rank_comment($a1, $op) {
+  if ($op == 'insert') {
+    postcount_rank_update();
+  }
+}
+
+
+function postcount_rank_update() {
+  global $user;
+  profile_load_profile($user);
+  $fid = variable_get('postcount_rank_fid', 0);
+  $ranks = variable_get('postcount_rank_metrics',array());
+  $new_rank = '';
+  if ($user->uid && $fid) {
+    $field_name = db_result(db_query("SELECT name FROM {profile_fields} where fid = %d", $fid));
+    if (!$field_name) {
+      return;
+    }
+    $count = postcount_rank_postcount($user);
+    foreach ($ranks as $rank => $postcount) {
+      if ($count > $postcount) {
+        $new_rank = $rank;
+      }
+    }
+    // Update the rank, if necessary
+    if ($new_rank != $user->$field_name) {
+      if (!isset($user->$field_name)) {
+        db_query("INSERT INTO {profile_values} (fid, uid, value) VALUES (%d, %d, '%s')", $fid, $user->uid, $new_rank);
+      }
+      else {
+        db_query("UPDATE {profile_values} SET value = '%s' WHERE fid = %d AND uid = %d", $new_rank, $fid, $user->uid);
+      }
+    }
+  }
+}
+
+
+function postcount_rank_postcount($account) {
+  $count = 0;
+  if ($account->uid) {
+    $count += db_result(db_query("SELECT COUNT(*) from {node} where uid = %d", $account->uid));
+    if (module_exists('comment')) {
+      $count += db_result(db_query("SELECT COUNT(*) from {comments} where uid = %d", $account->uid));
+    }
+  }
+  return $count;
+}
+

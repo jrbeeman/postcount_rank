@@ -1,0 +1,4 @@
+; $Id$
+name = "Postcount Rank"
+description = "Allows users to receive a custom rank based on postcount"
+dependencies = profile
